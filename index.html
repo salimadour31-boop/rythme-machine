@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rythme Machine — Boîte à rythme libre</title>
+<style>
+  :root {
+    --bg: #0f0f12;
+    --fg: #e8e8ec;
+    --accent: #7c5cff;
+    --step: #2a2a32;
+    --active: #7c5cff;
+    --on: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, sans-serif;
+    background: var(--bg); color: var(--fg);
+    padding: 1rem; max-width: 900px; margin: auto;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 0.5rem; }
+  .lang { margin-bottom: 1rem; }
+  .lang button { margin-right: 0.5rem; background: var(--step); color: var(--fg); border: none; padding: 0.3rem 0.6rem; border-radius: 4px; cursor: pointer; }
+  .lang button.active { background: var(--accent); }
+  .controls { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin: 1rem 0; }
+  button.play { background: var(--accent); color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 6px; font-size: 1rem; cursor: pointer; }
+  input[type=range] { width: 120px; }
+  .grid { display: grid; gap: 4px; margin: 1rem 0; }
+  .track { display: grid; grid-template-columns: 80px repeat(16, 1fr); gap: 4px; align-items: center; }
+  .label { font-size: 0.85rem; }
+  .step {
+    aspect-ratio: 1; background: var(--step); border-radius: 4px; cursor: pointer;
+    border: 2px solid transparent;
+  }
+  .step.on { background: var(--on); }
+  .step.current { border-color: #fff; }
+  footer { margin-top: 2rem; font-size: 0.8rem; opacity: 0.7; }
+</style>
+</head>
+<body>
+<h1 id="title">Rythme Machine</h1>
+<div class="lang">
+  <button data-lang="fr" class="active">FR</button>
+  <button data-lang="en">EN</button>
+  <button data-lang="tz">TZ</button>
+</div>
+<div class="controls">
+  <button class="play" id="playBtn">▶ Play</button>
+  <label><span id="bpmLabel">BPM</span>: <input type="range" id="bpm" min="60" max="180" value="120"> <span id="bpmVal">120</span></label>
+  <button id="clear">Clear</button>
+  <button id="export">Export JSON</button>
+</div>
+<div class="grid" id="grid"></div>
+<footer id="footer">100% navigateur · MIT · Aucun envoi de données</footer>
+<script>
+const i18n = {
+  fr: { title: "Rythme Machine", play: "▶ Lecture", stop: "■ Stop", bpm: "BPM", clear: "Effacer", export: "Exporter JSON", kick: "Kick", snare: "Caisse", hihat: "Charleston", footer: "100% navigateur · MIT · Aucun envoi de données" },
+  en: { title: "Rhythm Machine", play: "▶ Play", stop: "■ Stop", bpm: "BPM", clear: "Clear", export: "Export JSON", kick: "Kick", snare: "Snare", hihat: "Hi-hat", footer: "100% browser · MIT · No data sent" },
+  tz: { title: "Tamacint n Rythme", play: "▶ Play", stop: "■ Stop", bpm: "BPM", clear: "Sfeḍ", export: "Export JSON", kick: "Kick", snare: "Snare", hihat: "Hi-hat", footer: "100% ameskar · MIT · Ulac tayyult" }
+};
+let lang = "fr";
+function t(k) { return i18n[lang][k] || k; }
+function updateUI() {
+  document.getElementById("title").textContent = t("title");
+  document.getElementById("playBtn").textContent = playing ? t("stop") : t("play");
+  document.getElementById("bpmLabel").textContent = t("bpm");
+  document.getElementById("clear").textContent = t("clear");
+  document.getElementById("export").textContent = t("export");
+  document.getElementById("footer").textContent = t("footer");
+  document.querySelectorAll(".lang button").forEach(b => b.classList.toggle("active", b.dataset.lang === lang));
+  document.querySelectorAll(".label").forEach((el, i) => {
+    const names = [t("kick"), t("snare"), t("hihat")];
+    el.textContent = names[i];
+  });
+}
+document.querySelectorAll(".lang button").forEach(b => {
+  b.onclick = () => { lang = b.dataset.lang; updateUI(); };
+});
+
+const steps = 16;
+const tracks = 3;
+let pattern = Array(tracks).fill().map(() => Array(steps).fill(false));
+let playing = false;
+let currentStep = 0;
+let timer = null;
+let audioCtx = null;
+
+const grid = document.getElementById("grid");
+function buildGrid() {
+  grid.innerHTML = "";
+  for (let tr = 0; tr < tracks; tr++) {
+    const row = document.createElement("div");
+    row.className = "track";
+    const lab = document.createElement("div");
+    lab.className = "label";
+    row.appendChild(lab);
+    for (let s = 0; s < steps; s++) {
+      const cell = document.createElement("div");
+      cell.className = "step" + (pattern[tr][s] ? " on" : "");
+      cell.onclick = () => {
+        pattern[tr][s] = !pattern[tr][s];
+        cell.classList.toggle("on");
+      };
+      cell.dataset.tr = tr;
+      cell.dataset.s = s;
+      row.appendChild(cell);
+    }
+    grid.appendChild(row);
+  }
+  updateUI();
+}
+buildGrid();
+
+document.getElementById("bpm").oninput = e => {
+  document.getElementById("bpmVal").textContent = e.target.value;
+  if (playing) restart();
+};
+document.getElementById("clear").onclick = () => {
+  pattern = Array(tracks).fill().map(() => Array(steps).fill(false));
+  buildGrid();
+};
+document.getElementById("export").onclick = () => {
+  const blob = new Blob([JSON.stringify({bpm: +document.getElementById("bpm").value, pattern})], {type: "application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "rythme-pattern.json";
+  a.click();
+};
+
+function initAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+}
+function playKick(time) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.frequency.setValueAtTime(150, time);
+  osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.5);
+  gain.gain.setValueAtTime(1, time);
+  gain.gain.exponentialRampToValueAtTime(0.01, time + 0.5);
+  osc.start(time); osc.stop(time + 0.5);
+}
+function playSnare(time) {
+  const noise = audioCtx.createBufferSource();
+  const bufferSize = audioCtx.sampleRate * 0.2;
+  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+  noise.buffer = buffer;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = "highpass"; filter.frequency.value = 1000;
+  const gain = audioCtx.createGain();
+  noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+  gain.gain.setValueAtTime(0.5, time);
+  gain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+  noise.start(time); noise.stop(time + 0.2);
+}
+function playHihat(time) {
+  const noise = audioCtx.createBufferSource();
+  const bufferSize = audioCtx.sampleRate * 0.05;
+  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+  noise.buffer = buffer;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = "highpass"; filter.frequency.value = 7000;
+  const gain = audioCtx.createGain();
+  noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+  gain.gain.setValueAtTime(0.3, time);
+  gain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+  noise.start(time); noise.stop(time + 0.05);
+}
+const sounds = [playKick, playSnare, playHihat];
+
+function tick() {
+  const bpm = +document.getElementById("bpm").value;
+  const interval = 60 / bpm / 4; // 16th notes
+  const now = audioCtx.currentTime;
+  for (let tr = 0; tr < tracks; tr++) {
+    if (pattern[tr][currentStep]) sounds[tr](now);
+  }
+  document.querySelectorAll(".step").forEach(el => el.classList.remove("current"));
+  document.querySelectorAll(`.step[data-s="${currentStep}"]`).forEach(el => el.classList.add("current"));
+  currentStep = (currentStep + 1) % steps;
+}
+function start() {
+  initAudio();
+  playing = true;
+  currentStep = 0;
+  updateUI();
+  const bpm = +document.getElementById("bpm").value;
+  const interval = (60 / bpm / 4) * 1000;
+  timer = setInterval(tick, interval);
+}
+function stop() {
+  playing = false;
+  clearInterval(timer);
+  document.querySelectorAll(".step").forEach(el => el.classList.remove("current"));
+  updateUI();
+}
+function restart() {
+  if (playing) { stop(); start(); }
+}
+document.getElementById("playBtn").onclick = () => playing ? stop() : start();
+updateUI();
+</script>
+</body>
+</html>
